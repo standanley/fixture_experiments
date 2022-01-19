@@ -1,13 +1,15 @@
 import numpy as np
 import scipy
-np.random.seed(444)
+np.random.seed(4)
 import matplotlib.pyplot as plt
 #import scipy.spatial
 import scipy.optimize
 import itertools
+import time
 
 
 def get_data():
+    # two planes
     x = np.random.random(1000)
     y = np.random.random(1000)
     z_low = x*0.2 + y*0.4 + 0.2
@@ -19,6 +21,7 @@ def get_data():
     return x*5, y*5, z*5
 
 def get_data2():
+    # small ears
     x = np.random.random(1000)
     y = np.random.random(1000)
 
@@ -32,10 +35,21 @@ def get_data2():
     return x*5, y*5, z*5
 
 def get_data3():
+    # bowl
     x = np.random.random(1000)
     y = np.random.random(1000)
 
     z = 1.3*(x-0.2)**2 + 2.2*(y-0.5)**2 - 2
+
+    #plot(x, y, z)
+    return x*5, y*5, z*5
+
+def get_data4():
+    # amp
+    x = np.random.random(1000)
+    y = np.random.random(1000)
+
+    z = np.tanh((x-.5)*3)
 
     #plot(x, y, z)
     return x*5, y*5, z*5
@@ -644,11 +658,33 @@ class CandidateFit:
             ordering = np.argsort(dists)
             self.points_i = list(ordering[:INPUT_DIM + 1])
             data = self.cf.data[self.points_i]
+
+            plane = None
+            plane_point_count = 0
+            total_count = 0
+            regression_count = 0
             for point_i in ordering[INPUT_DIM + 1:]:
                 new_row = self.cf.data[point_i]
+                total_count += 1
+
+                if (plane_point_count > (INPUT_DIM+1)*2
+                    and data.shape[0] < 2*plane_point_count):
+                    rough_pred = new_row[:-1] @ plane
+                    rough_error = rough_pred - new_row[-1]
+                    if abs(rough_error) < etol:
+                        # nice, just add with existing plane
+                        data = np.vstack((data, new_row))
+                    elif plane_point_count > abs(rough_error) > 2*etol:
+                        # don't bother with this one
+                        continue
+
+
+                # if we made it here, we couldn't do the rough check
+                regression_count += 1
                 new_data = np.vstack((data, new_row))
                 plane, residual, r, s = np.linalg.lstsq(
                     new_data[:, :-1], new_data[:, -1], rcond=None)
+                plane_point_count = new_data.shape[0]
                 preds = new_data[:, :-1] @ plane
                 errs = preds - new_data[:, -1]
                 err = np.max(np.abs(errs))
@@ -657,6 +693,7 @@ class CandidateFit:
                     data = new_data
                     self.points_i.append(point_i)
 
+            print(regression_count, '/', total_count)
             # mostly saved for plotting; maybe remove for mem performance?
             self.data = data
 
@@ -695,7 +732,7 @@ class CandidateFit:
                                np.ones((self.NUM_POINTS, 1)),
                                self.z.reshape((self.NUM_POINTS, 1))))
 
-        etol = 0.5
+        etol = 0.25
         NUM_ROUNDS = 3
         candidates = []
         for i in range(NUM_ROUNDS):
@@ -725,23 +762,24 @@ class CandidateFit:
             c = candidates.pop(choice_i)
             choices.append(c)
 
+            print('Time:', time.time() - start_time)
 
-            fig = plt.figure()
-            ax = fig.add_subplot(projection='3d')
-            ax.scatter(self.data[:, 0], self.data[:, 1], self.data[:, 3])
-
-            #ax.scatter(self.data[:, 0], self.data[:, 1], self.data[:, 2]+3.0)
-            for c_plot in choices:
-                plane, residual, r, s = np.linalg.lstsq(
-                    c_plot.data[:, :-1], c_plot.data[:, -1])
-                preds = c_plot.data[:, :-1] @ plane
-                ax.scatter(c_plot.data[:, 0], c_plot.data[:, 1], preds)
-
-            plt.show()
-
-            points_remaining_i = np.setdiff1d(points_remaining_i, c.points_remaining_i)
             if len(points_remaining_i) == 0:
+                fig = plt.figure()
+                ax = fig.add_subplot(projection='3d')
+                ax.scatter(self.data[:, 0], self.data[:, 1], self.data[:, 3])
+
+                #ax.scatter(self.data[:, 0], self.data[:, 1], self.data[:, 2]+3.0)
+                for c_plot in choices:
+                    plane, residual, r, s = np.linalg.lstsq(
+                        c_plot.data[:, :-1], c_plot.data[:, -1])
+                    preds = c_plot.data[:, :-1] @ plane
+                    ax.scatter(c_plot.data[:, 0], c_plot.data[:, 1], preds)
+
+                plt.show()
+
                 break
+            points_remaining_i = np.setdiff1d(points_remaining_i, c.points_remaining_i)
 
             # update candidates for the next selection
             for candidate in candidates:
@@ -749,7 +787,6 @@ class CandidateFit:
         else:
             assert False, 'Oops, not enough candidates, didnt span everything'
 
-            print()
 
         print()
 
@@ -759,9 +796,7 @@ class CandidateFit:
         c.plot()
 
 
-
-
-
+start_time = time.time()
 if __name__ == '__main__':
     #fit(*get_data())
     #exit()
@@ -771,7 +806,7 @@ if __name__ == '__main__':
 
     #fit4(*get_data())
 
-    x, y, z = get_data2()
+    x, y, z = get_data4()
     xs = np.stack((x.T, y.T), 1)
     #FragmentFit(xs, z)
     #NetFit(xs, z)
