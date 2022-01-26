@@ -2,22 +2,27 @@ import numpy as np
 import scipy
 np.random.seed(4)
 import matplotlib.pyplot as plt
-#import scipy.spatial
+import scipy.spatial
 import scipy.optimize
 import itertools
 import time
 from collections import defaultdict
+from fixture import Sampler
 
+#import cProfile
 
 def get_data():
     # two planes
     x = np.random.random(1000)
     y = np.random.random(1000)
-    z_low = x*0.2 + y*0.4 + 0.2
+    z_low = x*0.2 + y*0.4 + 0.3
     #z_high = x*1.2 + y*1.6 - 0.9
     z_high = x*2.2 + y*3.6 - 2.9
     z = np.max((z_low, z_high), axis=0) + np.random.normal(0, 0.01, z_low.shape)
 
+    print('test err', np.linalg.norm(np.max((z_low, z_high), axis=0)-z))
+    # intersection line before scaling is y=-5/8x+1, after scaling
+    # y=-5/8x+5
     #plot(x, y, z)
     return x*5, y*5, z*5
 
@@ -55,28 +60,47 @@ def get_data4():
     extra_gain = 1 + (y-0.5)*0.6
     z = np.tanh((x-.5)*2*extra_gain)
 
+    #plot(x, y, z)
 
     slope_removal = (x-.5)*1.7
     z = z - slope_removal
 
-    plot(x, y, z)
+    #plot(x, y, z)
+    plt.show()
     return x*5, y*5, z*5
 
 def get_data5():
     # amp
-    x = np.random.random(1000)
-    y = np.random.random(1000)
+    x = np.random.random(500)
+    y = np.random.random(500)
 
     z = (x-0.5) * np.clip((y-0.5), -0.15, 0.15)
 
-    plot(x, y, z)
+    #plot(x, y, z)
     return x*5, y*5, z*5
+
+def get_data_3d():
+    # amp
+    x = np.random.random(500)
+    y = np.random.random(500)
+    z = np.random.random(500)
+
+
+    # intersection plane should be 1x+2y+3z-3=0
+    # high has higher slope, and both pass through (.5, .5, .5, 0)
+    w_low = 0.6*x + 0.2*y + 1.2*z - 1
+    w_high = 1.6*x + 2.2*y + 4.2*z - 4
+    w = np.max((w_low, w_high), axis=0)
+
+    xs = np.stack((x, y, z), axis=1)
+    #plot(x, y, z)
+    return xs*5, w*5
 
 def plot(x, y, z):
     fig = plt.figure()
     ax = plt.axes(projection='3d')
     ax.scatter(x, y, z)
-    plt.show()
+    #plt.show()
 
 def plot_multiple(things):
     fig = plt.figure()
@@ -371,6 +395,26 @@ class FragmentFit:
                 print(self.err2(frag.points))
 
 
+def get_unit_simplex(dim):
+    # return a d-dimensional simplex where every vertex is distance
+    # 1 from every other
+    if dim == 1:
+        return np.array([[-0.5], [0.5]])
+    rec = get_unit_simplex(dim - 1)
+    base = np.concatenate((rec, np.zeros((dim, 1))), 1)
+
+    dist_to_center = np.linalg.norm(base[0])
+    height = (1 - dist_to_center**2)**0.5
+
+    bump = np.zeros(dim)
+    bump[-1] = -1 * height / (dim+1)
+    base += bump
+
+    new = np.zeros(dim)
+    new[-1] = height * (1 - 1/(dim+1))
+
+    ans = np.concatenate((base, new.reshape(1, dim)), 0)
+    return ans
 
 class NetFit:
     class BadSplitException(BaseException):
@@ -483,12 +527,12 @@ class NetFit:
             region = check_region(point, ridge_splits_initial)
             test[region].append(point)
 
-        for ps in test:
-            ps = np.array(ps)
-            plt.scatter(ps[:,0], ps[:,1])
+        #for ps in test:
+        #    ps = np.array(ps)
+        #    plt.scatter(ps[:,0], ps[:,1])
         #plt.show()
 
-        scipy.spatial.voronoi_plot_2d(v)
+        #scipy.spatial.voronoi_plot_2d(v)
         #plt.show()
 
 
@@ -563,26 +607,6 @@ class NetFit:
                 # so just say the error here is bad
                 return float('inf')
 
-        def get_unit_simplex(dim):
-            # return a d-dimensional simplex where every vertex is distance
-            # 1 from every other
-            if dim == 1:
-                return np.array([[-0.5], [0.5]])
-            rec = get_unit_simplex(dim - 1)
-            base = np.concatenate((rec, np.zeros((dim, 1))), 1)
-
-            dist_to_center = np.linalg.norm(base[0])
-            height = (1 - dist_to_center**2)**0.5
-
-            bump = np.zeros(dim)
-            bump[-1] = -1 * height / (dim+1)
-            base += bump
-
-            new = np.zeros(dim)
-            new[-1] = height * (1 - 1/(dim+1))
-
-            ans = np.concatenate((base, new.reshape(1, dim)), 0)
-            return ans
         simplex = get_unit_simplex(3)
 
         state_init = np.reshape(v.vertices, (np.product(v.vertices.shape)))
@@ -915,8 +939,388 @@ class ContinuousFit:
 
 
 
+class SimplexFit:
+    '''
+    If we want T triangles, how many vertices do we need?
+    F+V=E+2
+    T = F-1
+    E = (T*3+X)/2, X is number of edges on convex hull
+    T+1+V-2 = T*3/2+X/2
+    1+V-2-X/2=T/2
+    T = 2V - X - 2
+
+    '''
+
+    def __init__(self, xs, z, boundaries):
+        INPUT_DIM = xs.shape[1]
+        self.INPUT_DIM = INPUT_DIM
+        NUM_POINTS = xs.shape[0]
+        NUM_VS = NUM_POINTS // 4
+        boundaries = np.array(boundaries)
+        self.z = z
+
+        EDGE_NUM = round(NUM_VS**(1/INPUT_DIM))
+        #EDGE_NUM = 4
+        '''
+        For INPUT_DIM=N, There are 2*N boundaries, each an N-1 dimensional square
+        We break each boundary into EDGE_NUMxEDGE_NUMx... regions
+        Each boundary uses (EDGE_NUM-1)^ uhhh
+        Actually, ignore that. If we were to fill the hypercube with
+        evenly-spaced points, we would need (EDGE_NUM+1)^N, but we will remove
+        the inside (EDGE_NUM-1)^N. This leaves roughly 2*N*(EDGE_NUM)^(N-1)
+        '''
+        # this loop is order (EDGE_NUM-1)^INPUT_DIM, could be slightly better
+        edges = []
+        for i, vertex in enumerate(itertools.product(np.linspace(0,1,EDGE_NUM),repeat=INPUT_DIM)):
+            if (0 not in vertex) and (1 not in vertex):
+                continue
+            edges.append(vertex)
+        edges = np.array(edges)
+
+        other = Sampler.get_orthogonal_samples(INPUT_DIM, NUM_VS-edges.shape[0])
+        #other = np.random.random((NUM_VS-edges.shape[0], INPUT_DIM))
 
 
+        vertices_unscaled = np.vstack((edges, other))
+        vertices = vertices_unscaled*(boundaries[1]-boundaries[0])+boundaries[0]
+
+        print('Initial test')
+        self.evaluate_vertices(vertices, plot=True)
+
+        old_num = float('inf')
+        DECAY_RATE = 0.75
+        END_NUM = 6
+        assert END_NUM >= 2**INPUT_DIM
+        MINIMIZER_START = 30 # good with 50
+        vertices_history = []
+        error_history = []
+        while True:
+            d, heights, preds = self.evaluate_vertices(vertices)
+            print(f'\nTop of loop with {len(vertices)} vertices, {d.simplices.shape[0]} simplices')
+            err = np.linalg.norm(preds - self.z)
+            vertices_history.append(vertices.shape[0])
+            error_history.append(err)
+
+            if len(vertices) <= 12:
+                #d, heights, preds = self.evaluate_vertices(vertices)
+                #fig = plt.figure()
+                #ax = fig.add_subplot(projection='3d')
+                #ax.scatter(vertices[:, 0], vertices[:, 1],
+                #           np.clip(heights, -10, 10))
+                #color = d.find_simplex(xs)
+                ## ax.scatter(xs[:,0], xs[:,1], preds, c=color)
+
+                fig = plt.figure()
+                ax = fig.add_subplot(projection='3d')
+                ax.scatter(xs[:, 0], xs[:, 1], z)
+                ax.scatter(vertices[:, 0], vertices[:, 1], heights)
+                color = d.find_simplex(xs)
+                ax.scatter(xs[:, 0], xs[:, 1], preds, c=color)
+                #plt.show()
+
+
+            old_num = len(vertices)
+            if old_num == END_NUM:
+                break
+            new_num = round(old_num*DECAY_RATE)
+            if new_num < END_NUM:
+                new_num = END_NUM
+
+            vertices = self.cull_vertices(vertices, new_num, d, heights)
+            assert vertices.shape[0] == new_num
+            print('After culling to', new_num)
+            d, heights, preds = self.evaluate_vertices(vertices, plot=True)
+
+
+            if new_num <= MINIMIZER_START:
+                DECAY_RATE = 0.866
+                #print('calling minimizer, with', new_num, 'vertices')
+                vertices = self.wiggle(vertices, z, final=new_num==END_NUM)
+
+            d, heights, preds = self.evaluate_vertices(vertices, plot=True)
+
+
+
+        #fig = plt.figure()
+        #ax = fig.add_subplot(projection='3d')
+        #ax.scatter(vertices[:, 0], vertices[:, 1],
+        #           np.clip(heights, -10, 10))
+        #color = d.find_simplex(xs)
+        ## ax.scatter(xs[:,0], xs[:,1], preds, c=color)
+
+        #fig = plt.figure()
+        #ax = fig.add_subplot(projection='3d')
+        #ax.scatter(xs[:, 0], xs[:, 1], z)
+        #color = d.find_simplex(xs)
+        #ax.scatter(xs[:, 0], xs[:, 1], preds, c=color)
+        #ax.scatter(vertices[:, 0], vertices[:, 1], heights)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='3d')
+        color = d.find_simplex(xs)
+        ax.scatter(xs[:, 0], xs[:, 1], preds - z, c=color)
+
+        fig = plt.figure()
+        plt.grid()
+        plt.loglog(vertices_history, error_history, 'x')
+
+
+        plt.show()
+
+
+        print('done')
+
+        ## delete the ones with low angles
+        #lowest_angles = np.argsort(ratings)[:round(NUM_VS*0.9)]
+        #for c in corners_i:
+        #    if c in lowest_angles:
+        #        lowest_angles = np.delete(lowest_angles, np.where(lowest_angles==c))
+        #culled_vertices = np.delete(vertices, lowest_angles, axis=0)
+
+        #d, heights, preds = self.evaluate_vertices(culled_vertices)
+
+        #fig = plt.figure()
+        #ax = fig.add_subplot(projection='3d')
+        #ax.scatter(xs[:,0], xs[:,1], z)
+        #color = d.find_simplex(xs)
+        #ax.scatter(xs[:,0], xs[:,1], preds, c=color)
+        #plt.show()
+
+
+
+
+
+    def evaluate_vertices(self, vertices, plot=False):
+        NUM_VS = vertices.shape[0]
+
+        d = scipy.spatial.Delaunay(vertices)
+
+        if plot and NUM_VS <= 12:
+            figure = plt.figure()
+            ax = figure.add_subplot()
+            ax.plot([0, 5], [5, 15/8], '--')
+            scipy.spatial.delaunay_plot_2d(d, ax)
+            #plt.show()
+
+        # now we build matrix M s.t.
+        # M @ heights = pred
+        # and we can say
+        # pinv(M) @ z = heights_best_fit
+        # this relies on knowing which triangle each row of z is in
+        M = []
+        for point in xs:
+            simplex_i = int(d.find_simplex(point))
+            if simplex_i == -1:
+                # this sample point is outside the space spanned by the vertices
+                # there's an issue with the vertices; probably missing corners
+                return d, None, np.array([float('inf')]*self.z.shape[0])
+
+            vertex_is = d.simplices[simplex_i]
+            #barycentric = d.transform[simplex_i] @ point
+            point_shifted = point - d.transform[simplex_i][-1]
+            barycentric_short = d.transform[simplex_i][:-1] @ point_shifted
+            barycentric = np.append(barycentric_short, 1-sum(barycentric_short))
+
+            assert sum(barycentric) == 1
+            for b in barycentric:
+                assert 0 <= b <= 1
+
+            row = [0]*NUM_VS
+            for vertex_i, b in zip(vertex_is, barycentric):
+                row[vertex_i] = b
+            M.append(row)
+        M = np.array(M)
+
+        heights = np.linalg.pinv(M) @ self.z
+        preds = M @ heights
+
+
+        err = np.linalg.norm(preds - self.z)
+        if plot:
+            print('got err', err)
+
+        return d, heights, preds
+
+    def rate_vertices(self, d, heights):
+        # lower is better for removal
+        INPUT_DIM = self.INPUT_DIM
+        NUM_VS = len(d.points)
+        assert len(heights) == NUM_VS
+        # quick note on notation: var_i is an index into d.simplices or
+        # d.points. var_index is an index into d.simplices[foo_i], so it's the
+        # second indirection
+        vertices = np.hstack((d.points, heights.reshape(NUM_VS, 1)))
+
+        badness_by_vertex = np.zeros(NUM_VS)
+        for simplex_a_i, a_neighbors in enumerate(d.neighbors):
+            for a_unshared_index, simplex_b_i in enumerate(a_neighbors):
+                if simplex_b_i == 0:
+                    # we are at the edge
+                    continue
+                if simplex_a_i > simplex_b_i:
+                    # avoid checking this combo twice
+                    continue
+                a_unshared_i = d.simplices[simplex_a_i][a_unshared_index]
+                # Let's find the angle between these a and b simplices
+                b_neighbors = d.neighbors[simplex_b_i]
+                b_unshared_index = list(b_neighbors).index(simplex_a_i)
+                b_unshared_i = d.simplices[simplex_b_i][b_unshared_index]
+
+                all_vertices_a_i = d.simplices[simplex_a_i]
+                shared_vertices_i = np.delete(all_vertices_a_i,
+                                              a_unshared_index)
+
+                for test_shared in d.simplices[simplex_b_i]:
+                    assert (test_shared == b_unshared_i
+                            or test_shared in shared_vertices_i)
+
+                shared_vertices = vertices[shared_vertices_i]
+
+                ref_point = shared_vertices[0]
+                # subspace uses column vectors
+                shared_subspace = (shared_vertices[1:] - ref_point).T
+                a_vector = vertices[a_unshared_i] - ref_point
+                b_vector = vertices[b_unshared_i] - ref_point
+                assert shared_subspace.shape == (INPUT_DIM+1, INPUT_DIM-1)
+
+                unshared_subspace = np.linalg.qr(shared_subspace, mode='complete')[0][:, -2:]
+                # this matrix multiply both projects the vectors onto the
+                # unshared subspace and converts them to a (2D) coordinate
+                # system that only spans the unshared subspace
+                a_subspace = unshared_subspace.T @ a_vector
+                b_subspace = unshared_subspace.T @ b_vector
+
+                # now we get the angle normally (clip b/c of precision issue)
+                norm = np.linalg.norm
+                a_norm = norm(a_subspace)
+                b_norm = norm(b_subspace)
+                if a_norm == 0 or b_norm == 0:
+                    # one of the simplices has zero volume ... that's weird
+                    # I saw it when some subspaces had no datapoints
+                    # in that case we don't need vertices here; say it's the
+                    # flattest possible angle, so vectors are antiparallel
+                    x = -1.0
+                else:
+                    x = (np.dot(a_subspace, b_subspace)
+                         / (a_norm*b_norm))
+                x_safe = np.clip(x, -1.0, 1.0)
+                angle = np.arccos(x_safe)
+
+                ## TEST
+                #assert INPUT_DIM == 2
+                #normal_a = np.cross(shared_subspace.reshape(3), a_vector)
+                #normal_b = np.cross(shared_subspace.reshape(3), b_vector)
+                #y = (np.dot(normal_a, normal_b)
+                #     / (norm(normal_a) * norm(normal_b)))
+                #y_safe = np.clip(y, -1.0, 1.0)
+                #test_angle = np.arccos(y_safe)
+                #assert abs(angle - test_angle) < 1e-5
+
+                # pi means simplices agree, pi/2 means 90 degrees off,
+                # 0 means an incredibly sharp fold
+                badness = np.pi - angle
+                assert 0 <= badness <= np.pi
+                badness_by_vertex[shared_vertices_i] += badness
+
+
+        return badness_by_vertex
+
+
+    def rate_vertices2(self, d):
+        # dead simple: try removing each vertex, and see what happens
+        orig_vertices = d.points
+        ans = []
+        for i in range(len(orig_vertices)):
+            new_vertices = np.delete(orig_vertices, i, 0)
+            preds = self.evaluate_vertices(new_vertices)[2]
+            err = np.linalg.norm(preds - self.z)
+            ans.append(err)
+        return np.array(ans)
+
+
+    def cull_vertices(self, vertices, desired_num, d, heights):
+        if vertices.shape[0] < 100:
+            ratings = self.rate_vertices2(d)
+        else:
+            ratings = self.rate_vertices(d, heights)
+
+        bounds = 0, 5 # np.min(vertices), np.max(vertices)
+        corners_i = [i for i, v in enumerate(vertices)
+                     if all(x == bounds[0] or x == bounds[1] for x in v)]
+        print(f'Found {len(corners_i)} corners')
+
+        # delete the ones with low angles
+        ratings_i = np.argsort(ratings)
+        for c in corners_i:
+            if c in ratings_i:
+                ratings_i = np.delete(ratings_i, np.where(ratings_i==c))
+        lowest_angles = ratings_i[:len(vertices)-desired_num]
+
+        culled_vertices = np.delete(vertices, lowest_angles, axis=0)
+        return culled_vertices
+
+    def wiggle(self, vertices, z, final=False):
+        INPUT_DIM = vertices.shape[1]
+        # use nelder-mead to adjust positions
+        # You can move things along a boundary, but not off a boundary
+        mins = np.min(vertices, 0)
+        maxs = np.max(vertices, 0)
+        # TODO I am relying on floating point comparison here, but I think
+        # it should be okay since the values were arrived at the same way
+        bottoms = vertices == 0
+        tops = vertices == 5
+        not_boundaries = np.logical_not(np.logical_or(bottoms, tops))
+        vertices_orig = vertices.copy()
+
+        def vs_to_state(vertices):
+            # don't move things off an edge:
+            state = np.extract(not_boundaries, vertices)
+            return state
+
+        def state_to_vs(state):
+            vs = vertices_orig.copy()
+            np.place(vs, not_boundaries, state)
+            return vs
+
+        def minimizer_error(state):
+            # TODO penalize vs outside the boundaries
+            vs = state_to_vs(state)
+            d, heights, preds = self.evaluate_vertices(vs)
+            err = np.linalg.norm(preds-z)
+            return err
+
+        state_init = vs_to_state(vertices_orig)
+        print('Going into minimizer, error', minimizer_error(state_init))
+        converted_vs = state_to_vs(state_init)
+        assert np.all(converted_vs == vertices_orig)
+
+        state_init = vs_to_state(vertices_orig)
+        simplex = get_unit_simplex(len(state_init))
+        INIT_SIMPLEX_SIZE = 0.3
+        #simplex_stretch = simplex * INIT_SIMPLEX_SIZE*(maxs-mins) + mins
+        # TODO to know how much to stretch the simplex in each dimension you
+        # need to know which input dimension each state entry came from
+        # TODO while you're at it, also pass those bounds in the options
+        simplex_stretch = simplex * INIT_SIMPLEX_SIZE*(5)
+        simplex_init = state_init + simplex_stretch
+        max_fev = 5000 if final else 500
+        result = scipy.optimize.minimize(minimizer_error, np.zeros(state_init.shape),
+                                         bounds=[[0,5]]*len(state_init),
+                                         method='Nelder-Mead',
+                                         options={'disp': True,
+                                                  'maxfev': max_fev,
+                                                  'initial_simplex': simplex_init,
+                                                  #'fatol': 0.1,
+                                                  'adaptive': True})
+
+        result_state = result.x
+        #print('quick test', minimizer_error(result_state))
+        result_vertices = state_to_vs(result_state)
+
+        # sometimes two vertices get pushed into a corner together - in that
+        # case they are redundant
+        result_vertices_clean = np.unique(result_vertices, axis=0)
+        return result_vertices_clean
 
 
 
@@ -930,13 +1334,24 @@ if __name__ == '__main__':
 
     #fit4(*get_data())
 
-    x, y, z = get_data5()
+    x, y, z = get_data4()
     xs = np.stack((x.T, y.T), 1)
+
     #FragmentFit(xs, z)
     #NetFit(xs, z)
-    cf = CandidateFit(xs, z)
-    planes = [c.plane for c in cf.candidates]
-    subsets = [c.points_i for c in cf.candidates]
+    #cf = CandidateFit(xs, z)
+    #planes = [c.plane for c in cf.candidates]
+    #subsets = [c.points_i for c in cf.candidates]
 
-    ContinuousFit(xs, z, planes, subsets)
+    #ContinuousFit(xs, z, planes, subsets)
+
+
+    #SimplexFit(xs, z, [[0,0], [5,5]])
+    #wrapper = lambda _: SimplexFit(xs, z, [[0,0], [5,5]])
+    #cProfile.run('wrapper(0)')
+
+    SimplexFit(xs, z, [[0,0], [5,5]])
+
+    #xs, z = get_data_3d()
+    SimplexFit(xs, z, [[0,0,0], [5,5,5]])
     print()
