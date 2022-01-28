@@ -1,13 +1,13 @@
 import numpy as np
 import scipy
-np.random.seed(4)
+np.random.seed(4444)
 import matplotlib.pyplot as plt
 import scipy.spatial
 import scipy.optimize
 import itertools
 import time
 from collections import defaultdict
-from fixture import Sampler
+#from fixture import Sampler
 
 #import cProfile
 
@@ -66,7 +66,7 @@ def get_data4():
     z = z - slope_removal
 
     #plot(x, y, z)
-    plt.show()
+    #plt.show()
     return x*5, y*5, z*5
 
 def get_data5():
@@ -76,7 +76,8 @@ def get_data5():
 
     z = (x-0.5) * np.clip((y-0.5), -0.15, 0.15)
 
-    #plot(x, y, z)
+    plot(x, y, z)
+    #plt.show()
     return x*5, y*5, z*5
 
 def get_data_3d():
@@ -95,6 +96,21 @@ def get_data_3d():
     xs = np.stack((x, y, z), axis=1)
     #plot(x, y, z)
     return xs*5, w*5
+
+def get_data_binary():
+    NUM_BITS = 3
+    x = np.random.random((500))
+    binary = np.random.randint(0, 2, size=(500, NUM_BITS))
+    weights = 2**np.array(range(NUM_BITS))
+    binary_value = np.sum(binary*weights, axis=1)
+    z_linear = 2.0*(x-0.5) + 0.1*binary_value
+    z = np.tanh(z_linear)
+
+    plot(x, binary_value, z)
+    #xs = np.hstack((x.reshape((len(x),1)), binary))
+    xs = np.hstack((x.reshape((len(x),1)), 1/2**NUM_BITS*binary_value.reshape((len(x), 1))))
+    return xs*5, z*5
+
 
 def plot(x, y, z):
     fig = plt.figure()
@@ -212,7 +228,7 @@ def fit4(x, y, z):
 
 class FragmentFit:
     #MAX_ERR = 0.5
-    MAX_ERR = 0.01
+    MAX_ERR = 0.001
 
     class Fragment:
         def __init__(self, fit, id, center):
@@ -361,7 +377,7 @@ class FragmentFit:
         print()
 
     def __init__(self, xs, z):
-        assert False, 'Some fragments have error above MAX_ERR; must be a bug'
+        #assert False, 'Some fragments have error above MAX_ERR; must be a bug'
         self.maxes = np.max(xs, axis=0)
         self.mins = np.min(xs, axis=0)
         self.xs = (xs - self.mins) / (self.maxes - self.mins)
@@ -398,6 +414,7 @@ class FragmentFit:
 def get_unit_simplex(dim):
     # return a d-dimensional simplex where every vertex is distance
     # 1 from every other
+    assert dim > 0
     if dim == 1:
         return np.array([[-0.5], [0.5]])
     rec = get_unit_simplex(dim - 1)
@@ -784,7 +801,7 @@ class CandidateFit:
                                np.ones((self.NUM_POINTS, 1)),
                                self.z.reshape((self.NUM_POINTS, 1))))
 
-        etol = 0.8
+        etol = 0.4
         NUM_ROUNDS = 5
         candidates = []
         scatter_etol = []
@@ -829,16 +846,16 @@ class CandidateFit:
 
             print('Time:', time.time() - start_time)
 
-            ## Incremental plot of planes so far
-            #fig = plt.figure()
-            #ax = fig.add_subplot(projection='3d')
-            ##ax.scatter(self.data[:, 0], self.data[:, 1], self.data[:, 3])
-            #for c_plot in choices:
-            #    plane, residual, r, s = np.linalg.lstsq(
-            #        c_plot.data[:, :-1], c_plot.data[:, -1])
-            #    preds = c_plot.data[:, :-1] @ plane
-            #    ax.scatter(c_plot.data[:, 0], c_plot.data[:, 1], preds)
-            #plt.show()
+            # Incremental plot of planes so far
+            fig = plt.figure()
+            ax = fig.add_subplot(projection='3d')
+            #ax.scatter(self.data[:, 0], self.data[:, 1], self.data[:, 3])
+            for c_plot in choices:
+                plane, residual, r, s = np.linalg.lstsq(
+                    c_plot.data[:, :-1], c_plot.data[:, -1])
+                preds = c_plot.data[:, :-1] @ plane
+                ax.scatter(c_plot.data[:, 0], c_plot.data[:, 1], preds)
+            plt.show()
 
             points_remaining_i = np.setdiff1d(points_remaining_i, c.points_remaining_i)
             if len(points_remaining_i) == 0:
@@ -956,6 +973,7 @@ class SimplexFit:
         self.INPUT_DIM = INPUT_DIM
         NUM_POINTS = xs.shape[0]
         NUM_VS = NUM_POINTS // 4
+        #NUM_VS = 16
         boundaries = np.array(boundaries)
         self.z = z
 
@@ -977,8 +995,8 @@ class SimplexFit:
             edges.append(vertex)
         edges = np.array(edges)
 
-        other = Sampler.get_orthogonal_samples(INPUT_DIM, NUM_VS-edges.shape[0])
-        #other = np.random.random((NUM_VS-edges.shape[0], INPUT_DIM))
+        #other = Sampler.get_orthogonal_samples(INPUT_DIM, NUM_VS-edges.shape[0])
+        other = np.random.random((NUM_VS-edges.shape[0], INPUT_DIM))
 
 
         vertices_unscaled = np.vstack((edges, other))
@@ -989,7 +1007,7 @@ class SimplexFit:
 
         old_num = float('inf')
         DECAY_RATE = 0.75
-        END_NUM = 6
+        END_NUM = 5
         assert END_NUM >= 2**INPUT_DIM
         MINIMIZER_START = 30 # good with 50
         vertices_history = []
@@ -1055,19 +1073,21 @@ class SimplexFit:
         #ax.scatter(xs[:, 0], xs[:, 1], preds, c=color)
         #ax.scatter(vertices[:, 0], vertices[:, 1], heights)
 
-        fig = plt.figure()
-        ax = fig.add_subplot(projection='3d')
-        color = d.find_simplex(xs)
-        ax.scatter(xs[:, 0], xs[:, 1], preds - z, c=color)
+        ## here are the figures I usually use
+        #fig = plt.figure()
+        #ax = fig.add_subplot(projection='3d')
+        #color = d.find_simplex(xs)
+        #ax.scatter(xs[:, 0], xs[:, 1], preds - z, c=color)
 
-        fig = plt.figure()
-        plt.grid()
-        plt.loglog(vertices_history, error_history, 'x')
-
-
-        plt.show()
+        #fig = plt.figure()
+        #plt.grid()
+        #plt.loglog(vertices_history, error_history, 'x')
 
 
+        #plt.show()
+
+
+        fit = Fit.from_triangulation(d, heights)
         print('done')
 
         ## delete the ones with low angles
@@ -1087,15 +1107,35 @@ class SimplexFit:
         #plt.show()
 
 
+    def get_position(self, d, point):
+        simplex_i = int(d.find_simplex(point))
+        if simplex_i == -1:
+            # this sample point is outside the space spanned by the vertices
+            # there's an issue with the vertices; probably missing corners
+            #assert False
+            return None, None
 
+        vertex_is = d.simplices[simplex_i]
+        # barycentric = d.transform[simplex_i] @ point
+        point_shifted = point - d.transform[simplex_i][-1]
+        barycentric_short = d.transform[simplex_i][:-1] @ point_shifted
+        barycentric = np.append(barycentric_short, 1 - sum(barycentric_short))
 
+        assert sum(barycentric) == 1
+        for b in barycentric:
+            # TODO when there are quantized input dimensions you often have
+            # points exactly on the edge, and they introduce rounding errors
+            assert -1e-12 <= b <= 1+1e-12
+
+        return vertex_is, barycentric
 
     def evaluate_vertices(self, vertices, plot=False):
         NUM_VS = vertices.shape[0]
 
         d = scipy.spatial.Delaunay(vertices)
 
-        if plot and NUM_VS <= 12:
+        if (plot and NUM_VS <= 12
+            and d.points.shape[1] == 2):
             figure = plt.figure()
             ax = figure.add_subplot()
             ax.plot([0, 5], [5, 15/8], '--')
@@ -1109,21 +1149,11 @@ class SimplexFit:
         # this relies on knowing which triangle each row of z is in
         M = []
         for point in xs:
-            simplex_i = int(d.find_simplex(point))
-            if simplex_i == -1:
-                # this sample point is outside the space spanned by the vertices
-                # there's an issue with the vertices; probably missing corners
-                return d, None, np.array([float('inf')]*self.z.shape[0])
-
-            vertex_is = d.simplices[simplex_i]
-            #barycentric = d.transform[simplex_i] @ point
-            point_shifted = point - d.transform[simplex_i][-1]
-            barycentric_short = d.transform[simplex_i][:-1] @ point_shifted
-            barycentric = np.append(barycentric_short, 1-sum(barycentric_short))
-
-            assert sum(barycentric) == 1
-            for b in barycentric:
-                assert 0 <= b <= 1
+            vertex_is, barycentric = self.get_position(d, point)
+            if barycentric is None:
+                # NOTE this is intended behavior when rate_vertices2 tries to
+                # remove a corner
+                return d, None, np.array([float('inf')] * self.z.shape[0])
 
             row = [0]*NUM_VS
             for vertex_i, b in zip(vertex_is, barycentric):
@@ -1257,6 +1287,12 @@ class SimplexFit:
         lowest_angles = ratings_i[:len(vertices)-desired_num]
 
         culled_vertices = np.delete(vertices, lowest_angles, axis=0)
+
+
+        test_corners_i = [i for i, v in enumerate(vertices)
+                     if all(x == bounds[0] or x == bounds[1] for x in v)]
+        assert len(test_corners_i) == len(corners_i)
+
         return culled_vertices
 
     def wiggle(self, vertices, z, final=False):
@@ -1270,6 +1306,9 @@ class SimplexFit:
         bottoms = vertices == 0
         tops = vertices == 5
         not_boundaries = np.logical_not(np.logical_or(bottoms, tops))
+        if np.count_nonzero(not_boundaries) == 0:
+            # everything is jammed in a corner?
+            return vertices
         vertices_orig = vertices.copy()
 
         def vs_to_state(vertices):
@@ -1322,10 +1361,122 @@ class SimplexFit:
         result_vertices_clean = np.unique(result_vertices, axis=0)
         return result_vertices_clean
 
+    def predict_one(self, d, heights, point):
+        vertex_is, barycentric = self.get_position(d, point)
+        vertex_heights = point[vertex_is]
+        ans = vertex_heights @ barycentric
+        return ans
+
+class Fit:
+    def __init__(self, edges, planes, mapping):
+        # mostly we use homogeneous coordinates for the point
+        # "edges" is a matrix where each row represents one region division
+        #     an "edge" is an N-1 dim dividing plane in N dim input space
+        # "planes" is a matrix where each row is a fitting plane
+        #     a "plane" is an N dim fitting plane in N+1 dim input/output space
+        # "mapping" is a list where each entry defines the requirements to be
+        # considered within a particular region.
+        # For more documentation, look at Fit.predict
+        self.edges = edges
+        self.planes = planes
+        self.mapping = mapping
+
+        self.INPUT_DIM = self.edges.shape[1] - 1
+        assert self.planes.shape[1] == self.INPUT_DIM + 1
+
+    def predict(self, point):
+        assert point.shape == (self.INPUT_DIM,)
+        # using homogeneous coordinates
+        point_h = np.append(point, 1)
+        edge_decisions = (self.edges @ point_h) > 0
+
+        matching_regions = []
+        for plane_i, map_pairs in enumerate(mapping):
+            if all(edge_decisions[edge_i] == is_positive
+                   for edge_i, is_positive in map_pairs):
+                matching_regions.append(plane_i)
+
+        # if the mapping was constructed correctly, then a point inside will
+        # always match exactly one region. There may be issues if the point is
+        # exactly on a vertex; I haven't thought that fully through. Should be
+        # very careful with that in the limited-bitwidth verilog implementation
+        assert len(matching_regions) > 0, 'No matching regions, point may be outside bounds?'
+        assert len(matching_regions) < 2, 'Multiple matching regions, probably bug in mapping'
+        matching_region = matching_regions[0]
+
+        plane = self.planes[matching_region]
+        height = plane @ point_h
+        return height
+
+    @classmethod
+    def from_triangulation(cls, d, heights):
+        class Region:
+            def __init__(self):
+                self.edges = []
+        class Edge:
+            def __init__(self, dot, region_pos, region_neg):
+                self.dot = dot
+                self.region_pos = region_pos
+                self.region_neg = region_neg
+                self.region_pos.edges.append((self, True))
+                self.region_neg.edges.append((self, False))
+
+        # use d.neighbors to populate regions/edges graph
+        regions = [Region() for _ in d.simplices]
+        edges = []
+        for region_i, neighbor_list in enumerate(d.neighbors):
+            for opposite_vertex_index, neighbor_i in enumerate(neighbor_list):
+                if neighbor_i < region_i:
+                    # avoid doing this pair twice
+                    continue
+                ## commenting out this section that found the edge based on
+                ## shared vertex positions - this is essentially thrown out when
+                ## we redraw the boundaries later anyway
+                #simplex_vertices_i = d.simplices[region_i]
+                #shared_vertices_i = np.delete(simplex_vertices_i, opposite_vertex_index)
+                #shared_vertices = d.points[shared_vertices_i]
+                #unshared_vertex = d.points[simplex_vertices_i[opposite_vertex_index]]
+                #shared_vectors = shared_vertices[1:] - shared_vertices[0]
+
+                #normal = np.linalg.qr(shared_vectors.T, mode='complete')[0][:,-1]
+                #dot_value = shared_vertices[0] @ normal
+                #normal_h = np.append(normal, -dot_value)
+                #i_is_pos = (np.append(unshared_vertex, 1) @ normal_h) > 0
+
+                #region_pos_i = region_i if i_is_pos else neighbor_i
+                #region_neg_i = neighbor_i if i_is_pos else region_i
+                #e = Edge(normal_h, regions[region_pos_i], regions[region_neg_i])
+                #edges.append(e)
+
+                # find current best-fit plane
+                abc
+
+        # go through all the edges and delete the unnecesary ones
+        print()
+
+
+
+def presentation_plot():
+    x, y, z = get_data2()
+    y = 5-y
+    plot(x, y, z)
+
+    x, y, z = get_data5()
+    x = x/5
+    y = y/5
+    plot(x, y, z)
+
+    z = z + 2*x
+    plot(x, y, z)
+
+    plt.show()
+
 
 
 start_time = time.time()
 if __name__ == '__main__':
+    presentation_plot()
+    exit()
     #fit(*get_data())
     #exit()
 
@@ -1334,7 +1485,7 @@ if __name__ == '__main__':
 
     #fit4(*get_data())
 
-    x, y, z = get_data4()
+    x, y, z = get_data5()
     xs = np.stack((x.T, y.T), 1)
 
     #FragmentFit(xs, z)
@@ -1350,8 +1501,10 @@ if __name__ == '__main__':
     #wrapper = lambda _: SimplexFit(xs, z, [[0,0], [5,5]])
     #cProfile.run('wrapper(0)')
 
-    SimplexFit(xs, z, [[0,0], [5,5]])
+    #SimplexFit(xs, z, [[0,0], [5,5]])
 
     #xs, z = get_data_3d()
-    SimplexFit(xs, z, [[0,0,0], [5,5,5]])
+    #xs, z = get_data_binary()
+    SimplexFit(xs, z, [[0,0], [5,5]])
+    #SimplexFit(xs, z, [[0,0,0,0], [5,5,5,5]])
     print()
