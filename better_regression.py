@@ -24,7 +24,7 @@ def get_data():
     # intersection line before scaling is y=-5/8x+1, after scaling
     # y=-5/8x+5
     #plot(x, y, z)
-    return x*5, y*5, z*5
+    return x, y, z
 
 def get_data2():
     # small ears
@@ -38,7 +38,7 @@ def get_data2():
     z = np.max((np.min((z_low, z_mid), axis=0), z_high), axis=0) + np.random.normal(0, 0.0001, z_low.shape)
 
     #plot(x, y, z)
-    return x*5, y*5, z*5
+    return x, y, z
     #return x, y, z
 
 def get_data3():
@@ -49,7 +49,7 @@ def get_data3():
     z = 1.3*(x-0.2)**2 + 2.2*(y-0.5)**2 - 2
 
     #plot(x, y, z)
-    return x*5, y*5, z*5
+    return x, y, z
     #return x, y, z
 
 def data_transform_4(x, y):
@@ -75,7 +75,7 @@ def get_data4():
 
     plot(x, y, z)
     #plt.show()
-    return x*5, y*5, z*5
+    return x, y, z
 
 
 
@@ -88,7 +88,7 @@ def get_data5():
 
     #plot(x, y, z)
     #plt.show()
-    return x*5, y*5, z*5
+    return x, y, z
 
 def get_data_3d():
     # amp
@@ -105,7 +105,7 @@ def get_data_3d():
 
     xs = np.stack((x, y, z), axis=1)
     #plot(x, y, z)
-    return xs*5, w*5
+    return xs, w
 
 def get_data_binary():
     NUM_BITS = 3
@@ -119,7 +119,7 @@ def get_data_binary():
     plot(x, binary_value, z)
     #xs = np.hstack((x.reshape((len(x),1)), binary))
     xs = np.hstack((x.reshape((len(x),1)), 1/2**NUM_BITS*binary_value.reshape((len(x), 1))))
-    return xs*5, z*5
+    return xs, z
 
 
 def plot(x, y, z):
@@ -1303,7 +1303,7 @@ class SimplexFit:
         else:
             ratings = self.rate_vertices(d, heights)
 
-        bounds = 0, 5 # np.min(vertices), np.max(vertices)
+        bounds = 0, 1
         corners_i = [i for i, v in enumerate(vertices)
                      if all(x == bounds[0] or x == bounds[1] for x in v)]
         #print(f'Found {len(corners_i)} corners')
@@ -1333,7 +1333,7 @@ class SimplexFit:
         # TODO I am relying on floating point comparison here, but I think
         # it should be okay since the values were arrived at the same way
         bottoms = vertices == 0
-        tops = vertices == 5
+        tops = vertices == 1
         not_boundaries = np.logical_not(np.logical_or(bottoms, tops))
         if np.count_nonzero(not_boundaries) == 0:
             # everything is jammed in a corner?
@@ -1369,11 +1369,11 @@ class SimplexFit:
         # TODO to know how much to stretch the simplex in each dimension you
         # need to know which input dimension each state entry came from
         # TODO while you're at it, also pass those bounds in the options
-        simplex_stretch = simplex * INIT_SIMPLEX_SIZE*(5)
+        simplex_stretch = simplex * INIT_SIMPLEX_SIZE
         simplex_init = state_init + simplex_stretch
         max_fev = 1000 if final else 100
         result = scipy.optimize.minimize(minimizer_error, np.zeros(state_init.shape),
-                                         bounds=[[0,5]]*len(state_init),
+                                         bounds=[[0,1]]*len(state_init),
                                          method='Nelder-Mead',
                                          options={'disp': True,
                                                   'maxfev': max_fev,
@@ -1658,10 +1658,10 @@ if __name__ == '__main__':
 
 
     xy = xs[:,0]*xs[:,1]
-    xy = xy * 5 / np.max(xy)
+    #xy = xy * 5 / np.max(xy)
     xs = np.insert(xs, 2, xy, axis=1)
     xs = xs[:,1:3]
-    fit = SimplexFit(xs, z, [[0,0], [5,5]]).fit
+    fit = SimplexFit(xs, z, [[0,0], [1,1]]).fit
     #fit = SimplexFit(xs, z, [[0,0,0], [5,5,5]]).fit
     preds = fit.predict_vec(xs)
     fig = plt.figure()
@@ -1681,22 +1681,22 @@ if __name__ == '__main__':
     def get_xs(gain):
         N = 100
         gain = np.ones((N, 1)) * gain
-        input = np.linspace(0, 5, N).reshape((N, 1))
+        input = np.linspace(0, 1, N).reshape((N, 1))
         # return np.hstack((input, gain))
-        return np.hstack((input, gain, input * gain / 5))
+        return np.hstack((input, gain, input * gain / 1))
         # return np.hstack((gain, input * gain / 5))
 
 
     plt.figure()
-    for gain in [0, 1.25, 2.5, 3.75, 5]:
+    for gain in [0, .25, .5, .75, 1]:
         xs_full = get_xs(gain)
-        preds = data_transform_4(xs_full[:, 0] / 5, xs_full[:, 1] / 5) * 5
+        preds = data_transform_4(xs_full[:, 0], xs_full[:, 1])
         plt.plot(xs_full[:, 0], preds)
     plt.grid()
     # plt.show()
 
     plt.figure()
-    for gain in [0, 1.25, 2.5, 3.75, 5]:
+    for gain in [0, .25, .5, .75, 1]:
         xs_full = get_xs(gain)
         preds = fit.predict_vec(xs_full[:, 1:3])
         plt.plot(xs_full[:, 0], preds)
@@ -1704,25 +1704,25 @@ if __name__ == '__main__':
 
     plt.show()
     print()
-    #wrapper = lambda _: SimplexFit(xs, z, [[0,0], [5,5]])
+    #wrapper = lambda _: SimplexFit(xs, z, [[0,0], [1,1]])
     #cProfile.run('wrapper(0)')
 
-    #SimplexFit(xs, z, [[0,0], [5,5]])
+    #SimplexFit(xs, z, [[0,0], [1,1]])
 
     #xs, z = get_data_3d()
     #xs, z = get_data_binary()
-    #SimplexFit(xs, z, [[0,0], [5,5]])
-    #SimplexFit(xs, z, [[0,0,0,0], [5,5,5,5]])
+    #SimplexFit(xs, z, [[0,0], [1,1]])
+    #SimplexFit(xs, z, [[0,0,0,0], [1,1,1,1]])
 
     # check amp with generated dimension
-    #SimplexFit(xs, z, [[0,0], [5,5]])
+    #SimplexFit(xs, z, [[0,0], [1,1]])
     # without ext, some data:
     # 10 vertices -> 1.59
     # 7 vertices -> 2.12
     # 5 vertices -> 4.51
 
     xy = xs[:,0]*xs[:,1]
-    xy = xy * 5 / np.max(xy)
+    #xy = xy / np.max(xy)
     xs_ext = np.insert(xs, 2, xy, axis=1)
-    SimplexFit(xs_ext, z, [[0,0,0], [5,5,5]])
+    SimplexFit(xs_ext, z, [[0,0,0], [1,1,1]])
     print()
