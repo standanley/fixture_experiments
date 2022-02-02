@@ -52,33 +52,41 @@ def get_data3():
     return x*5, y*5, z*5
     #return x, y, z
 
+def data_transform_4(x, y):
+    extra_gain = 1+(y-1/1.3)*1.3
+    z = np.tanh((x-.5)*2*extra_gain)
+    return z
+
 def get_data4():
     # amp
     x = np.random.random(1000)
     y = np.random.random(1000)
 
-    #extra_gain = 1 + (y-0.5)*0.6
-    extra_gain = 1+(y-1/1.3)*1.3
-    z = np.tanh((x-.5)*2*extra_gain)
-    #z = (x - .5) * 2 * extra_gain
+    ##extra_gain = 1 + (y-0.5)*0.6
+    #extra_gain = 1+(y-1/1.3)*1.3
+    #z = np.tanh((x-.5)*2*extra_gain)
+    ##z = (x - .5) * 2 * extra_gain
+    z = data_transform_4(x, y)
 
     #plot(x, y, z)
 
     #slope_removal = (x-.5)*1.7
     #z = z - slope_removal
 
-    #plot(x, y, z)
+    plot(x, y, z)
     #plt.show()
     return x*5, y*5, z*5
 
+
+
 def get_data5():
-    # amp
+    # twist
     x = np.random.random(500)
     y = np.random.random(500)
 
     z = (x-0.5) * np.clip((y-0.5), -0.15, 0.15)
 
-    plot(x, y, z)
+    #plot(x, y, z)
     #plt.show()
     return x*5, y*5, z*5
 
@@ -975,13 +983,13 @@ class SimplexFit:
         self.INPUT_DIM = INPUT_DIM
         NUM_POINTS = xs.shape[0]
         NUM_VS = NUM_POINTS // 4
-        #NUM_VS = 8
+        #NUM_VS = 16
         boundaries = np.array(boundaries)
         self.xs = xs
         self.z = z
 
         EDGE_NUM = int(NUM_VS**(1/INPUT_DIM))
-        EDGE_NUM = 2
+        #EDGE_NUM = 2
         '''
         For INPUT_DIM=N, There are 2*N boundaries, each an N-1 dimensional square
         We break each boundary into EDGE_NUMxEDGE_NUMx... regions
@@ -1000,12 +1008,23 @@ class SimplexFit:
 
         #other = Sampler.get_orthogonal_samples(INPUT_DIM, NUM_VS-edges.shape[0])
         other = np.random.random((NUM_VS-edges.shape[0], INPUT_DIM))
-        other = np.array([[0, 0.16001],
-                          [0.26663, 0],
-                          [0.80002, 1],
-                          [1, 0.79999]])
+        #other = np.array([[0, 0.16001],
+        #                  [0.26663, 0],
+        #                  [0.80002, 1],
+        #                  [1, 0.79999]])
 
         vertices_unscaled = np.vstack((edges, other))
+
+        #vertices_unscaled = np.array([
+        #    [.2, -3],
+        #    [.2, 3],
+        #    [-20, .5],
+        #    [.8, -3],
+        #    [.8, 3],
+        #    [20, 0.5],
+        #    [0.5, 0.5]
+        #])
+
         vertices = vertices_unscaled*(boundaries[1]-boundaries[0])+boundaries[0]
 
         print('Initial test')
@@ -1015,7 +1034,7 @@ class SimplexFit:
         DECAY_RATE = 0.75
         END_NUM = 8
         assert END_NUM >= 2**INPUT_DIM
-        MINIMIZER_START = 30 # good with 50
+        MINIMIZER_START = 12 # good with 30
         vertices_history = []
         error_history = []
         while True:
@@ -1061,7 +1080,7 @@ class SimplexFit:
                 #print('calling minimizer, with', new_num, 'vertices')
                 vertices = self.wiggle(vertices, z, final=new_num==END_NUM)
 
-            d, heights, preds = self.evaluate_vertices(vertices, plot=True)
+                d, heights, preds = self.evaluate_vertices(vertices, plot=True)
 
 
 
@@ -1144,7 +1163,7 @@ class SimplexFit:
 
         d = scipy.spatial.Delaunay(vertices)
 
-        if (plot and NUM_VS <= 10
+        if (plot and NUM_VS <= 8
             and d.points.shape[1] == 2):
             figure = plt.figure()
             ax = figure.add_subplot()
@@ -1287,7 +1306,7 @@ class SimplexFit:
         bounds = 0, 5 # np.min(vertices), np.max(vertices)
         corners_i = [i for i, v in enumerate(vertices)
                      if all(x == bounds[0] or x == bounds[1] for x in v)]
-        print(f'Found {len(corners_i)} corners')
+        #print(f'Found {len(corners_i)} corners')
 
         # delete the ones with low angles
         ratings_i = np.argsort(ratings)
@@ -1352,7 +1371,7 @@ class SimplexFit:
         # TODO while you're at it, also pass those bounds in the options
         simplex_stretch = simplex * INIT_SIMPLEX_SIZE*(5)
         simplex_init = state_init + simplex_stretch
-        max_fev = 5000 if final else 500
+        max_fev = 1000 if final else 100
         result = scipy.optimize.minimize(minimizer_error, np.zeros(state_init.shape),
                                          bounds=[[0,5]]*len(state_init),
                                          method='Nelder-Mead',
@@ -1410,8 +1429,10 @@ class Fit:
         # very careful with that in the limited-bitwidth verilog implementation
         assert len(
             matching_regions) > 0, 'No matching regions, point may be outside bounds?'
-        assert len(
-            matching_regions) < 2, 'Multiple matching regions, probably bug in mapping'
+        #assert len(
+        #    matching_regions) < 2, 'Multiple matching regions, probably bug in mapping'
+        if len(matching_regions) > 1:
+            print('MULTIPLE MATCHING REGIONS FOR', point_h)
         matching_region = matching_regions[0]
         return matching_region
 
@@ -1624,7 +1645,7 @@ if __name__ == '__main__':
 
     #fit4(*get_data())
 
-    x, y, z = get_data2()
+    x, y, z = get_data4()
     xs = np.stack((x.T, y.T), 1)
 
     #FragmentFit(xs, z)
@@ -1636,15 +1657,51 @@ if __name__ == '__main__':
     #ContinuousFit(xs, z, planes, subsets)
 
 
+    xy = xs[:,0]*xs[:,1]
+    xy = xy * 5 / np.max(xy)
+    xs = np.insert(xs, 2, xy, axis=1)
+    xs = xs[:,1:3]
     fit = SimplexFit(xs, z, [[0,0], [5,5]]).fit
+    #fit = SimplexFit(xs, z, [[0,0,0], [5,5,5]]).fit
     preds = fit.predict_vec(xs)
     fig = plt.figure()
+
+    #plt.scatter(xs[:,2], z)
+    #plt.plot(xs[:,2], preds)
+    #plt.show()
+
     ax = fig.add_subplot(projection='3d')
     ax.scatter(xs[:,0], xs[:,1], z)
     #color = d.find_simplex(xs)
     color = [fit.get_region(point_h)
              for point_h in np.append(xs, np.ones((len(xs), 1)), 1)]
     ax.scatter(xs[:,0], xs[:,1], preds, c=color)
+
+
+    def get_xs(gain):
+        N = 100
+        gain = np.ones((N, 1)) * gain
+        input = np.linspace(0, 5, N).reshape((N, 1))
+        # return np.hstack((input, gain))
+        return np.hstack((input, gain, input * gain / 5))
+        # return np.hstack((gain, input * gain / 5))
+
+
+    plt.figure()
+    for gain in [0, 1.25, 2.5, 3.75, 5]:
+        xs_full = get_xs(gain)
+        preds = data_transform_4(xs_full[:, 0] / 5, xs_full[:, 1] / 5) * 5
+        plt.plot(xs_full[:, 0], preds)
+    plt.grid()
+    # plt.show()
+
+    plt.figure()
+    for gain in [0, 1.25, 2.5, 3.75, 5]:
+        xs_full = get_xs(gain)
+        preds = fit.predict_vec(xs_full[:, 1:3])
+        plt.plot(xs_full[:, 0], preds)
+    plt.grid()
+
     plt.show()
     print()
     #wrapper = lambda _: SimplexFit(xs, z, [[0,0], [5,5]])
