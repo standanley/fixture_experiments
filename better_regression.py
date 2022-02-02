@@ -1,6 +1,6 @@
 import numpy as np
 import scipy
-np.random.seed(4444)
+np.random.seed(4)
 import matplotlib.pyplot as plt
 import scipy.spatial
 import scipy.optimize
@@ -57,13 +57,15 @@ def get_data4():
     x = np.random.random(1000)
     y = np.random.random(1000)
 
-    extra_gain = 1 + (y-0.5)*0.6
+    #extra_gain = 1 + (y-0.5)*0.6
+    extra_gain = 1+(y-1/1.3)*1.3
     z = np.tanh((x-.5)*2*extra_gain)
+    #z = (x - .5) * 2 * extra_gain
 
     #plot(x, y, z)
 
-    slope_removal = (x-.5)*1.7
-    z = z - slope_removal
+    #slope_removal = (x-.5)*1.7
+    #z = z - slope_removal
 
     #plot(x, y, z)
     #plt.show()
@@ -973,12 +975,13 @@ class SimplexFit:
         self.INPUT_DIM = INPUT_DIM
         NUM_POINTS = xs.shape[0]
         NUM_VS = NUM_POINTS // 4
-        #NUM_VS = 16
+        #NUM_VS = 8
         boundaries = np.array(boundaries)
+        self.xs = xs
         self.z = z
 
-        EDGE_NUM = round(NUM_VS**(1/INPUT_DIM))
-        #EDGE_NUM = 4
+        EDGE_NUM = int(NUM_VS**(1/INPUT_DIM))
+        EDGE_NUM = 2
         '''
         For INPUT_DIM=N, There are 2*N boundaries, each an N-1 dimensional square
         We break each boundary into EDGE_NUMxEDGE_NUMx... regions
@@ -997,7 +1000,10 @@ class SimplexFit:
 
         #other = Sampler.get_orthogonal_samples(INPUT_DIM, NUM_VS-edges.shape[0])
         other = np.random.random((NUM_VS-edges.shape[0], INPUT_DIM))
-
+        other = np.array([[0, 0.16001],
+                          [0.26663, 0],
+                          [0.80002, 1],
+                          [1, 0.79999]])
 
         vertices_unscaled = np.vstack((edges, other))
         vertices = vertices_unscaled*(boundaries[1]-boundaries[0])+boundaries[0]
@@ -1007,7 +1013,7 @@ class SimplexFit:
 
         old_num = float('inf')
         DECAY_RATE = 0.75
-        END_NUM = 5
+        END_NUM = 8
         assert END_NUM >= 2**INPUT_DIM
         MINIMIZER_START = 30 # good with 50
         vertices_history = []
@@ -1019,7 +1025,7 @@ class SimplexFit:
             vertices_history.append(vertices.shape[0])
             error_history.append(err)
 
-            if len(vertices) <= 12:
+            if len(vertices) <= 0:
                 #d, heights, preds = self.evaluate_vertices(vertices)
                 #fig = plt.figure()
                 #ax = fig.add_subplot(projection='3d')
@@ -1034,7 +1040,7 @@ class SimplexFit:
                 ax.scatter(vertices[:, 0], vertices[:, 1], heights)
                 color = d.find_simplex(xs)
                 ax.scatter(xs[:, 0], xs[:, 1], preds, c=color)
-                #plt.show()
+                plt.show()
 
 
             old_num = len(vertices)
@@ -1072,22 +1078,26 @@ class SimplexFit:
         #color = d.find_simplex(xs)
         #ax.scatter(xs[:, 0], xs[:, 1], preds, c=color)
         #ax.scatter(vertices[:, 0], vertices[:, 1], heights)
+        ##plt.show()
 
         ## here are the figures I usually use
         #fig = plt.figure()
         #ax = fig.add_subplot(projection='3d')
         #color = d.find_simplex(xs)
         #ax.scatter(xs[:, 0], xs[:, 1], preds - z, c=color)
+        ##plt.show()
 
         #fig = plt.figure()
         #plt.grid()
         #plt.loglog(vertices_history, error_history, 'x')
+        ##plt.show()
 
 
         #plt.show()
 
 
         fit = Fit.from_triangulation(d, heights)
+        self.fit = fit
         print('done')
 
         ## delete the ones with low angles
@@ -1134,11 +1144,11 @@ class SimplexFit:
 
         d = scipy.spatial.Delaunay(vertices)
 
-        if (plot and NUM_VS <= 12
+        if (plot and NUM_VS <= 10
             and d.points.shape[1] == 2):
             figure = plt.figure()
             ax = figure.add_subplot()
-            ax.plot([0, 5], [5, 15/8], '--')
+            #ax.plot([0, 5], [5, 15/8], '--')
             scipy.spatial.delaunay_plot_2d(d, ax)
             #plt.show()
 
@@ -1148,7 +1158,7 @@ class SimplexFit:
         # pinv(M) @ z = heights_best_fit
         # this relies on knowing which triangle each row of z is in
         M = []
-        for point in xs:
+        for point in self.xs:
             vertex_is, barycentric = self.get_position(d, point)
             if barycentric is None:
                 # NOTE this is intended behavior when rate_vertices2 tries to
@@ -1384,14 +1394,12 @@ class Fit:
         self.INPUT_DIM = self.edges.shape[1] - 1
         assert self.planes.shape[1] == self.INPUT_DIM + 1
 
-    def predict(self, point):
-        assert point.shape == (self.INPUT_DIM,)
-        # using homogeneous coordinates
-        point_h = np.append(point, 1)
+
+    def get_region(self, point_h):
         edge_decisions = (self.edges @ point_h) > 0
 
         matching_regions = []
-        for plane_i, map_pairs in enumerate(mapping):
+        for plane_i, map_pairs in enumerate(self.mapping):
             if all(edge_decisions[edge_i] == is_positive
                    for edge_i, is_positive in map_pairs):
                 matching_regions.append(plane_i)
@@ -1400,59 +1408,190 @@ class Fit:
         # always match exactly one region. There may be issues if the point is
         # exactly on a vertex; I haven't thought that fully through. Should be
         # very careful with that in the limited-bitwidth verilog implementation
-        assert len(matching_regions) > 0, 'No matching regions, point may be outside bounds?'
-        assert len(matching_regions) < 2, 'Multiple matching regions, probably bug in mapping'
+        assert len(
+            matching_regions) > 0, 'No matching regions, point may be outside bounds?'
+        assert len(
+            matching_regions) < 2, 'Multiple matching regions, probably bug in mapping'
         matching_region = matching_regions[0]
+        return matching_region
 
+    def predict(self, point):
+        assert point.shape == (self.INPUT_DIM,)
+        # using homogeneous coordinates
+        point_h = np.append(point, 1)
+        matching_region = self.get_region(point_h)
         plane = self.planes[matching_region]
         height = plane @ point_h
         return height
 
+    def predict_vec(self, xs):
+        pv = np.vectorize(lambda point: self.predict(point),
+                          signature='(n)->()')
+        return pv(xs)
+
+
     @classmethod
     def from_triangulation(cls, d, heights):
+        INPUT_DIM = d.points.shape[1]
         class Region:
-            def __init__(self):
+            def __init__(self, plane, vertices_i):
                 self.edges = []
+                self.planes = [plane]
+                self.vertices_i = set(vertices_i)
+
+            def get_plane(self):
+                # CAREFUL! This is only a good average near (0,0), but because
+                # our epsilon is so small it should be fine throughout our
+                # 0-1 square as well
+                avg = np.average(np.array(self.planes), axis=0)
+                return avg
+
+            #def absorb(self, other):
+            #    self.planes += other.planes
+            #    self.vertices_i |= other.vertices_i
+            #    for e in other.edges:
+            #        if e.region_a is other:
+            #            e.region_a = self
+            #        if e.region_b is other:
+            #            e.region_b = self
+
+            def __str__(self):
+                return str(id(self))[-4:]
+
         class Edge:
-            def __init__(self, dot, region_pos, region_neg):
-                self.dot = dot
-                self.region_pos = region_pos
-                self.region_neg = region_neg
-                self.region_pos.edges.append((self, True))
-                self.region_neg.edges.append((self, False))
+            def __init__(self, region_a, region_b, positive):
+                # region order doesn't matter
+                self.region_a = region_a
+                self.region_b = region_b
+                # positive iff we take the max of the regions at the break
+                self.positive = positive
+
+                self.region_a.edges.append(self)
+                self.region_b.edges.append(self)
+
+            def remove(self):
+                # region a absorbs region b
+                # edges referencing b should reference a instead
+                a = self.region_a
+                b = self.region_b
+                a.planes += b.planes
+                a.vertices_i |= b.vertices_i
+
+                a.edges.remove(self)
+                for e in b.edges:
+                    if e is self:
+                        continue
+                    if e.region_a == b:
+                        e.region_a = a
+                    if e.region_b == b:
+                        e.region_b = a
+                    a.edges.append(e)
+
+
+
+            def __str__(self):
+                return f'({self.region_a}, {self.region_b})'
+
+        # use d.simplices and heights to initialize all the regions with their
+        # fitting planes
+        regions = []
+        for vertex_list_i in d.simplices:
+            vertices_input = d.points[vertex_list_i]
+            vertices_output = heights[vertex_list_i].reshape((len(vertex_list_i),1))
+            vertices = np.concatenate((vertices_input, vertices_output), axis=1)
+            vectors = vertices[1:] - vertices[0]
+            normal = np.linalg.qr(vectors.T, mode='complete')[0][:,-1]
+            dot_result = normal @ vertices[0]
+            # we now have normal@xyz = dotresult
+            # ax+by+cz=d
+            # z=(-ax-by+d)/c
+            plane = np.append(-normal[:-1], dot_result) / normal[-1]
+            #plane = np.append(normal, -dot_result)
+            region = Region(plane, vertex_list_i)
+            regions.append(region)
 
         # use d.neighbors to populate regions/edges graph
-        regions = [Region() for _ in d.simplices]
         edges = []
         for region_i, neighbor_list in enumerate(d.neighbors):
             for opposite_vertex_index, neighbor_i in enumerate(neighbor_list):
                 if neighbor_i < region_i:
                     # avoid doing this pair twice
                     continue
-                ## commenting out this section that found the edge based on
-                ## shared vertex positions - this is essentially thrown out when
-                ## we redraw the boundaries later anyway
-                #simplex_vertices_i = d.simplices[region_i]
-                #shared_vertices_i = np.delete(simplex_vertices_i, opposite_vertex_index)
-                #shared_vertices = d.points[shared_vertices_i]
-                #unshared_vertex = d.points[simplex_vertices_i[opposite_vertex_index]]
-                #shared_vectors = shared_vertices[1:] - shared_vertices[0]
+                opposite_vertex_i = d.simplices[region_i][opposite_vertex_index]
 
-                #normal = np.linalg.qr(shared_vectors.T, mode='complete')[0][:,-1]
-                #dot_value = shared_vertices[0] @ normal
-                #normal_h = np.append(normal, -dot_value)
-                #i_is_pos = (np.append(unshared_vertex, 1) @ normal_h) > 0
+                # test_point is inside (edge of) region and not inside neighbor
+                test_point = np.append(d.points[opposite_vertex_i], 1)
+                region_height = regions[region_i].planes[0] @ test_point
+                neighbor_height = regions[neighbor_i].planes[0] @ test_point
+                positive_edge = region_height > neighbor_height
 
-                #region_pos_i = region_i if i_is_pos else neighbor_i
-                #region_neg_i = neighbor_i if i_is_pos else region_i
-                #e = Edge(normal_h, regions[region_pos_i], regions[region_neg_i])
-                #edges.append(e)
+                e = Edge(regions[region_i], regions[neighbor_i], positive_edge)
+                edges.append(e)
 
-                # find current best-fit plane
-                abc
 
         # go through all the edges and delete the unnecesary ones
-        print()
+        EPSILON = 1e-3
+        necessary_edges = []
+        for e in edges:
+            if e.region_a is e.region_b:
+                # happens if we delete all edges around a vertex
+                continue
+            diff = e.region_a.get_plane() - e.region_b.get_plane()
+            fit_check = np.linalg.norm(diff) < EPSILON
+            combined_vertices_i = e.region_a.vertices_i | e.region_b.vertices_i
+            combined_vertices = d.points[list(combined_vertices_i)]
+            qhull_options = f'{"Qx" if INPUT_DIM > 4 else ""} Qc'
+            hull = scipy.spatial.ConvexHull(combined_vertices,
+                                                   qhull_options=qhull_options)
+            # TODO If we ignore "coplanar" then we are just checking that it's
+            # convex, when we should be checking if it's nonconcave. I added
+            # the option "Qc" and checked hull.coplanar to get around that, but
+            # I'm not 100% sure I did it right
+            convex_check = (len(hull.vertices) + len(hull.coplanar)
+                            == len(combined_vertices_i))
+            if fit_check and convex_check:
+                # combine
+                e.remove()
+            else:
+                # keep
+                necessary_edges.append(e)
+
+
+        necessary_regions = set()
+        for e in necessary_edges:
+            necessary_regions.add(e.region_a)
+            necessary_regions.add(e.region_b)
+        necessary_regions = list(necessary_regions)
+
+        final_edges = []
+        for e in necessary_edges:
+            # ax+by+c = dx+ey+f
+            # (a-d)x + (b-e)y + (c-f) = 0
+            eq = e.region_a.get_plane() - e.region_b.get_plane()
+            # a positive dot product with eq means a > b
+            final_edges.append(eq)
+        final_edges = np.array(final_edges)
+
+        final_regions = []
+        for r in necessary_regions:
+            final_regions.append(r.get_plane())
+        final_regions = np.array(final_regions)
+
+        final_mapping_dict = defaultdict(list)
+        for e_i, e in enumerate(necessary_edges):
+            a = e.region_a
+            a_i = necessary_regions.index(a)
+            final_mapping_dict[a].append((e_i, e.positive))
+            b = e.region_b
+            b_i = necessary_regions.index(b)
+            final_mapping_dict[b].append((e_i, not e.positive))
+        final_mapping = [final_mapping_dict[r] for r in necessary_regions]
+
+        return cls(final_edges, final_regions, final_mapping)
+
+
+
+
 
 
 
@@ -1475,8 +1614,8 @@ def presentation_plot():
 
 start_time = time.time()
 if __name__ == '__main__':
-    presentation_plot()
-    exit()
+    #presentation_plot()
+    #exit()
     #fit(*get_data())
     #exit()
 
@@ -1485,7 +1624,7 @@ if __name__ == '__main__':
 
     #fit4(*get_data())
 
-    x, y, z = get_data5()
+    x, y, z = get_data2()
     xs = np.stack((x.T, y.T), 1)
 
     #FragmentFit(xs, z)
@@ -1497,7 +1636,17 @@ if __name__ == '__main__':
     #ContinuousFit(xs, z, planes, subsets)
 
 
-    #SimplexFit(xs, z, [[0,0], [5,5]])
+    fit = SimplexFit(xs, z, [[0,0], [5,5]]).fit
+    preds = fit.predict_vec(xs)
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    ax.scatter(xs[:,0], xs[:,1], z)
+    #color = d.find_simplex(xs)
+    color = [fit.get_region(point_h)
+             for point_h in np.append(xs, np.ones((len(xs), 1)), 1)]
+    ax.scatter(xs[:,0], xs[:,1], preds, c=color)
+    plt.show()
+    print()
     #wrapper = lambda _: SimplexFit(xs, z, [[0,0], [5,5]])
     #cProfile.run('wrapper(0)')
 
@@ -1505,6 +1654,18 @@ if __name__ == '__main__':
 
     #xs, z = get_data_3d()
     #xs, z = get_data_binary()
-    SimplexFit(xs, z, [[0,0], [5,5]])
+    #SimplexFit(xs, z, [[0,0], [5,5]])
     #SimplexFit(xs, z, [[0,0,0,0], [5,5,5,5]])
+
+    # check amp with generated dimension
+    #SimplexFit(xs, z, [[0,0], [5,5]])
+    # without ext, some data:
+    # 10 vertices -> 1.59
+    # 7 vertices -> 2.12
+    # 5 vertices -> 4.51
+
+    xy = xs[:,0]*xs[:,1]
+    xy = xy * 5 / np.max(xy)
+    xs_ext = np.insert(xs, 2, xy, axis=1)
+    SimplexFit(xs_ext, z, [[0,0,0], [5,5,5]])
     print()
